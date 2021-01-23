@@ -1,0 +1,41 @@
+{
+    "Comment": "The function load the DWH",
+    "StartAt": "raw layer load",
+    "States": {
+      "raw layer load": {
+      "Type": "Parallel",
+      "Branches": [
+        {
+          "StartAt": "contact_sat",
+          "States": {
+              "contact_sat": {
+                  "Type": "Task",
+                  "Resource": "arn:aws:states:::athena:startQueryExecution.sync",
+                  "Parameters": {
+                    "QueryString": "insert into dwh_raw.contact_sat (id, hash, first_name,last_name,address,load_ts)\nwith raw as (select * from (\nselect id,hash, rank () over (partition by id order by load_ts DESC) rank from dwh_raw.contact_sat) where rank=1)\nselect \nstg.id\n,lower(to_hex(md5(to_utf8(concat(trim(stg.first_name), '|',trim(stg.last_name),'|', trim(stg.address)))))) hash \n,stg.first_name\n,stg.last_name\n,stg.address\n,cast(current_timestamp as varchar)\nfrom dwh_stg.contact stg\nleft outer join raw on (stg.id=raw.id)\nwhere \nraw.id is null or \n(raw.id is not null and raw.hash <>\nlower(to_hex(md5(to_utf8(concat(trim(stg.first_name),'|', trim(stg.last_name),'|', trim(stg.address)))))))\n\n",
+                    "WorkGroup": "dwh"
+                  },
+                      "End": true
+                }
+          }
+        },
+        {
+          "StartAt": "contact_hub",
+         "States":{"contact_hub": {
+    "Type": "Task",
+    "Resource": "arn:aws:states:::athena:startQueryExecution.sync",
+    "Parameters": {
+      "QueryString": "insert into dwh_raw.contact_hub (id, load_ts,src)\nselect distinct stg.id, cast(current_timestamp as varchar),'crm'\nfrom dwh_stg.contact stg left outer join dwh_raw.contact_hub raw on (stg.id=raw.id)\nwhere raw.id is null",
+      "WorkGroup": "dwh"
+    },
+    "End": true
+  }
+          }
+        }
+      ],
+      "End": true
+    }
+  
+    }
+  }
+  

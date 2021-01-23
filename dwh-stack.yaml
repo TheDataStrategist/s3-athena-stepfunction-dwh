@@ -1,0 +1,142 @@
+
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+  S3Location:
+    Type: String
+    Default: my-dwh
+
+# Resources to create metadata in the Data Catalog
+Resources:
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Description: Base bucket for the dwh
+    Properties:
+      BucketName: !Ref S3Location
+###
+# Create an AWS Glue database
+  DwhDatabaseStg:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: dwh_stg
+        Description: The db holds the source tables for the DWH
+###
+# Create an AWS Glue table
+  DwhTableStgContact:
+    # Creating the table waits for the database to be created
+    DependsOn: DwhDatabaseStg
+    Type: AWS::Glue::Table
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseName: dwh_stg
+      TableInput:
+        Name: contact
+        Description: The table holds the contacs
+        TableType: EXTERNAL_TABLE
+        Parameters: {
+          "classification": "csv"
+          }
+        StorageDescriptor:
+          OutputFormat: org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat
+          Columns:
+          - Name: id
+            Type: bigint
+          - Name: account_id
+            Type: bigint
+          - Name: first_name
+            Type: string
+          - Name: last_name
+            Type: string
+          - Name: address
+            Type: string
+          InputFormat: org.apache.hadoop.mapred.TextInputFormat
+          Location: !Join [ "/", [ s3:/,!Ref S3Location, stg, contact/ ] ] 
+          SerdeInfo:
+            Parameters:
+              field.delim: ","
+            SerializationLibrary: org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe
+###
+# Create the raw database
+  DwhDatabaseRaw:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: dwh_raw
+        Description: The db holds the raw tables for the DWH
+  # Create an AWS Glue table
+  DwhTableRawContactHub:
+    # Creating the table waits for the database to be created
+    DependsOn: DwhDatabaseRaw
+    Type: AWS::Glue::Table
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseName: dwh_raw
+      TableInput:
+        Name: contact_hub
+        Description: The table holds the contact hub
+        TableType: EXTERNAL_TABLE
+        Parameters: {
+            "serialization.format": 1,
+            "classification": "parquet",
+            "parquet.compression": "SNAPPY"
+          }
+        StorageDescriptor:
+          OutputFormat: org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat
+          Columns:
+          - Name: id
+            Type: bigint
+          - Name: load_ts
+            Type: string
+          - Name: src
+            Type: string
+          InputFormat: org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat
+          Location: !Join [ "/", [ s3:/,!Ref S3Location, raw, contact_hub/ ] ] 
+          SerdeInfo:
+            SerializationLibrary: org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe
+  DwhTableRawContactSat:
+    # Creating the table waits for the database to be created
+    DependsOn: DwhDatabaseRaw
+    Type: AWS::Glue::Table
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseName: dwh_raw
+      TableInput:
+        Name: contact_sat
+        Description: The table holds the contact satellite
+        TableType: EXTERNAL_TABLE
+        Parameters: {
+            "serialization.format": 1,
+            "classification": "parquet",
+            "parquet.compression": "SNAPPY"
+          }
+        StorageDescriptor:
+          OutputFormat: org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat
+          Columns:
+          - Name: id
+            Type: bigint
+          - Name: hash
+            Type: string
+          - Name: load_ts
+            Type: string
+          - Name: first_name
+            Type: string
+          - Name: last_name
+            Type: string
+          - Name: address
+            Type: string
+          InputFormat: org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat
+          Location: !Join [ "/", [ s3:/,!Ref S3Location, raw, contact_sat/ ] ] 
+          SerdeInfo:
+            SerializationLibrary: org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe
+  DwhAthenaWorkGroup:
+    Type: AWS::Athena::WorkGroup
+    Properties:
+      Name: dwh
+      Description: Workgroup for the dwh project
+      State: ENABLED
+      WorkGroupConfiguration:
+        ResultConfiguration:
+          OutputLocation: !Join [ "/", [ s3:/,!Ref S3Location, athena-output-dir] ] 
